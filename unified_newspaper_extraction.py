@@ -141,11 +141,14 @@ def split_listings(text: str, delimiter: str) -> List[str]:
     """
     # Try multiple delimiter patterns common in PDFs and DOCX
     delimiters_to_try = [
-        delimiter,           # Original delimiter " l "
-        "\tl",              # Tab + l (common in PDFs)
-        "\nl",              # Newline + l
-        " \tl",             # Space + tab + l
+    delimiter,           # Original delimiter " l "
+    "\tl",               # Tab + l
+    "\nl",               # Newline + l
+    " \tl",              # Space + tab + l
+    "•",                 # Bullet used in many PDFs
+    "·",                 # Another common bullet
     ]
+
     
     # Find which delimiter works best (gives most splits)
     best_parts = [text]
