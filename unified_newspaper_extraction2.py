@@ -26,7 +26,7 @@ from PIL import Image
 # ======================================================================
 
 class Config:
-    PDF_GLOB = "MTClassifieds*.pdf"          # pattern for your newspaper PDFs
+    PDF_GLOB = r".\mylaporetimes\MTClassifieds*.pdf"
     RAW_CSV_OUTPUT = "raw_listings_temp.csv"
     STRUCTURED_CSV_OUTPUT = "structured_real_estate_accumulated.csv"
     PROCESSED_FILES_LOG = "processed_pdfs.txt"
@@ -63,26 +63,119 @@ def mark_file_as_processed(log_file: str, filename: str) -> None:
 # PDF TEXT EXTRACTION (TEXT + OCR)
 # ======================================================================
 
+def _words_to_column_text(words: list, page_width: float) -> str:
+    """Reconstruct reading-order text from word objects, respecting multi-column layout."""
+    if not words:
+        return ""
+
+    # Estimate line height from word bounding boxes
+    heights = [w['bottom'] - w['top'] for w in words if w['bottom'] > w['top']]
+    line_h = max(6.0, (sum(heights) / len(heights)) * 0.65) if heights else 9.0
+
+    # Build x-position histogram to locate column separators
+    n_bins = 80
+    bin_size = page_width / n_bins
+    hist = [0] * n_bins
+    for w in words:
+        b = min(int(w['x0'] / bin_size), n_bins - 1)
+        hist[b] += 1
+
+    # A real column gap must be at least 2 consecutive empty bins (~1.5% page width)
+    # to avoid false splits on word spacing within a column.
+    col_starts = [0.0]
+    i = 0
+    while i < n_bins:
+        if hist[i] == 0:
+            j = i
+            while j < n_bins and hist[j] == 0:
+                j += 1
+            if (j - i) >= 2 and j < n_bins:
+                col_starts.append(j * bin_size)
+            i = j
+        else:
+            i += 1
+    col_starts.append(page_width)
+
+    def get_col(x):
+        for ci in range(len(col_starts) - 1):
+            if col_starts[ci] <= x < col_starts[ci + 1]:
+                return ci
+        return len(col_starts) - 2
+
+    # Bucket each word by (column_index, row_index)
+    buckets: dict = {}
+    for w in words:
+        key = (get_col(w['x0']), int(w['top'] / line_h))
+        buckets.setdefault(key, []).append(w)
+
+    # Emit lines: column by column, top-to-bottom within each column
+    lines = []
+    for key in sorted(buckets):
+        row_words = sorted(buckets[key], key=lambda w: w['x0'])
+        lines.append(' '.join(w['text'] for w in row_words))
+
+    return '\n'.join(lines)
+
+
+def _looks_garbled(text: str) -> bool:
+    """Return True if text shows signs of multi-column mixing."""
+    words = [w for w in text.split() if w.isalpha()]
+    if not words:
+        return False
+    # Many single-char words → character-level interleaving
+    single = sum(1 for w in words if len(w) == 1)
+    if (single / len(words)) > 0.20:
+        return True
+    # Multiple bullets on same line → row-across-columns mixing (layout=True artifact)
+    lines = [l for l in text.split('\n') if l.strip()]
+    multi_bullet_lines = sum(
+        1 for l in lines
+        if l.count('•') + l.count('·') + l.count('●') > 1
+    )
+    return multi_bullet_lines > 2
+
+
+def _ocr_page(page) -> str:
+    """Render page to image and run Tesseract OCR. Returns empty string if unavailable."""
+    try:
+        img = page.to_image(resolution=300).original
+        if not isinstance(img, Image.Image):
+            img = Image.fromarray(img)
+        return pytesseract.image_to_string(img).strip()
+    except Exception:
+        return ""
+
+
 def extract_pdf_text(pdf_path: str) -> str:
     """
-    Extract text from each page.
-    - If text layer exists → use it
-    - If not → OCR the page image
+    Extract text from each page with multi-column awareness.
+    Strategy (in order):
+      1. pdfplumber layout mode (pdfminer LAParams) — handles columns natively
+      2. Word-position column reconstruction — fallback when layout mode unavailable
+      3. OCR — last resort for scanned/image pages (skipped if Tesseract absent)
     """
     all_text = []
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            page_text = page.extract_text() or ""
-            page_text = page_text.strip()
+            page_text = ""
 
-            # If page has almost no text, fall back to OCR
-            if len(page_text) < 30:
-                img = page.to_image(resolution=300).original
-                if not isinstance(img, Image.Image):
-                    img = Image.fromarray(img)
-                ocr_text = pytesseract.image_to_string(img)
-                page_text = ocr_text.strip()
+            # --- Strategy 1: layout-aware extraction (pdfplumber >= 0.9) ---
+            try:
+                page_text = page.extract_text(layout=True) or ""
+                page_text = page_text.strip()
+            except TypeError:
+                # Older pdfplumber doesn't support layout=True
+                page_text = ""
+
+            # --- Strategy 2: word-position column reconstruction ---
+            if len(page_text) < 30 or _looks_garbled(page_text):
+                words = page.extract_words(x_tolerance=7, y_tolerance=3)
+                page_text = _words_to_column_text(words, page.width) if words else ""
+
+            # --- Strategy 3: OCR (only if text layer is truly absent) ---
+            if len(page_text.strip()) < 30:
+                page_text = _ocr_page(page)
 
             if page_text:
                 all_text.append(page_text)
@@ -101,6 +194,11 @@ def split_listings(raw_text: str) -> List[str]:
     """
     # Normalize bullets
     text = raw_text.replace("•", "·").replace("●", "·").replace("▪", "·").replace("‣", "·")
+
+    # When layout=True outputs multiple columns on the same line, bullets end up
+    # mid-line.  Force each bullet onto its own line so the line-based logic below
+    # correctly treats it as a new listing start.
+    text = re.sub(r'([^\n])(·)', r'\1\n\2', text)
 
     # First, split by newlines
     lines = [l.strip() for l in text.splitlines() if l.strip()]
@@ -182,15 +280,20 @@ def extract_price(text: str) -> Tuple[Optional[float], Optional[str]]:
     """
     Sale price: look for 'Rate' or 'Price' or 'Rs.' with lakhs/crores.
     """
-    # Prefer patterns with 'Rate' or 'Price'
-    m = re.search(r"(Rate|Price)\s*([\d\.]+)\s*(lakhs?|crores?)", text, re.IGNORECASE)
+    # Require at least one leading digit so a bare '.' never matches
+    m = re.search(r"(Rate|Price)\s*(\d[\d\.]*)\s*(lakhs?|crores?)", text, re.IGNORECASE)
     if not m:
-        m = re.search(r"Rs\.?\s*([\d\.]+)\s*(lakhs?|crores?)", text, re.IGNORECASE)
+        m = re.search(r"Rs\.?\s*(\d[\d\.]*)\s*(lakhs?|crores?)", text, re.IGNORECASE)
     if not m:
-        m = re.search(r"([\d\.]+)\s*(lakhs?|crores?)", text, re.IGNORECASE)
+        m = re.search(r"(\d[\d\.]*)\s*(lakhs?|crores?)", text, re.IGNORECASE)
     if not m:
         return None, None
-    return float(m.group(2 if m.lastindex >= 2 else 1)), m.group(m.lastindex)
+    # Pattern 1 has 3 groups (keyword, number, unit); patterns 2 & 3 have 2 (number, unit)
+    num_group = 2 if m.lastindex == 3 else 1
+    try:
+        return float(m.group(num_group)), m.group(m.lastindex)
+    except ValueError:
+        return None, None
 
 
 def normalize_price(value: Optional[float], unit: Optional[str]) -> Optional[int]:
@@ -269,12 +372,13 @@ def detect_property_type(text: str) -> str:
 def is_real_estate_listing(text: str) -> bool:
     t = text.lower()
 
+    # These phrases indicate the listing is NOT about property — only block when
+    # they appear without any real-estate signal words in the same text.
     non_real_estate = [
-        "tuition", "classes", "teacher", "education", "coaching",
-        "pest control", "sofa", "manpower", "house maid", "cook",
-        "baby sitter", "driver", "nurse", "caretaker", "beauty parlour",
-        "hotel business", "music classes", "dance classes", "matrimonial",
-        "alliance", "change of name", "name as per", "clinic", "ayurveda",
+        "pest control", "manpower", "house maid", "baby sitter",
+        "beauty parlour", "matrimonial", "alliance",
+        "change of name", "name as per", "ayurveda",
+        "tuition centre", "coaching centre", "dance academy", "music academy",
     ]
     if any(k in t for k in non_real_estate):
         return False

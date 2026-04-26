@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($csv = Import-Csv \"C:\\\\Users\\\\Sundar\\\\OneDrive\\\\Desktop\\\\Sundar_MBA\\\\github\\\\newspaper-extract\\\\structured_real_estate_accumulated.csv\"; Write-Host \"Total rows: $\\($csv.Count\\)\"; $csv | Group-Object source_file | Select-Object Name, Count | Sort-Object Name)"
+    ]
+  }
+}
