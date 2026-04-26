@@ -180,7 +180,14 @@ def extract_pdf_text(pdf_path: str) -> str:
             if page_text:
                 all_text.append(page_text)
 
-    return "\n".join(all_text)
+    full_text = "\n".join(all_text)
+    full_text = re.sub(
+        r'YOU CAN READ THE CLASSIFIEDS ONLINE[^\n]*',
+        '',
+        full_text,
+        flags=re.IGNORECASE
+    )
+    return full_text
 
 
 # ======================================================================
@@ -308,8 +315,7 @@ def normalize_price(value: Optional[float], unit: Optional[str]) -> Optional[int
 
 
 def detect_rental(text: str) -> bool:
-    t = text.lower()
-    return "rent" in t or "rental" in t or "lease" in t
+    return bool(re.search(r'\bRent\b', text, re.IGNORECASE) or re.search(r'\blease\b', text, re.IGNORECASE))
 
 
 def extract_rent(text: str) -> Tuple[Optional[float], Optional[str]]:
@@ -346,6 +352,25 @@ def normalize_rent(value: Optional[float], unit: Optional[str]) -> Optional[int]
     if unit in ("l", "lakh", "lakhs"):
         return int(value * 100_000)
     return int(value)
+
+
+def extract_price_simple(text: str) -> Optional[int]:
+    """Fallback: extract price from NNNK (e.g. 90K) or Rs. NNNNN format."""
+    # Check K-suffix first so "Rs. 90K" returns 90000 not 90
+    m = re.search(r'\b(\d[\d\.]*)\s*K\b', text)
+    if m:
+        try:
+            return int(float(m.group(1)) * 1000)
+        except ValueError:
+            pass
+    m = re.search(r'Rs\.?\s*(\d[\d,]*(?:\.\d+)?)\b', text, re.IGNORECASE)
+    if m:
+        val_str = m.group(1).replace(',', '')
+        try:
+            return int(float(val_str))
+        except ValueError:
+            pass
+    return None
 
 
 def extract_locality(text: str, localities: List[str]) -> Optional[str]:
@@ -432,9 +457,13 @@ def process_listings_to_structured(
         if is_rent:
             rent_val, rent_unit = extract_rent(text)
             rent_in_inr = normalize_rent(rent_val, rent_unit)
+            price_in_inr = rent_in_inr
         else:
             price_val, price_unit = extract_price(text)
             price_in_inr = normalize_price(price_val, price_unit)
+
+        if price_in_inr is None:
+            price_in_inr = extract_price_simple(text)
 
         prop_type = detect_property_type(text)
 
