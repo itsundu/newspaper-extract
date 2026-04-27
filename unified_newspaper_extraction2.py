@@ -465,6 +465,10 @@ def process_listings_to_structured(
         if price_in_inr is None:
             price_in_inr = extract_price_simple(text)
 
+        # For rentals, keep rent_in_inr in sync with the final price_in_inr value
+        if is_rent and price_in_inr is not None:
+            rent_in_inr = price_in_inr
+
         prop_type = detect_property_type(text)
 
         rows.append({
