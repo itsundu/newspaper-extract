@@ -458,7 +458,6 @@ def process_listings_to_structured(
             rent_val, rent_unit = extract_rent(text)
             rent_in_inr = normalize_rent(rent_val, rent_unit)
             price_in_inr = rent_in_inr
-            rent_val = rent_in_inr
         else:
             price_val, price_unit = extract_price(text)
             price_in_inr = normalize_price(price_val, price_unit)
