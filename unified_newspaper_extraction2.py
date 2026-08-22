@@ -15,6 +15,7 @@ import glob
 from typing import List, Tuple, Optional
 
 import pandas as pd
+import requests
 
 import pdfplumber
 import pytesseract
@@ -36,6 +37,12 @@ class Config:
         "San Thome", "Alwarpet", "Thiruvanmiyur", "Gopalapuram",
         "MRC Nagar", "Pallikarnai", "Velachery", "Kottivakkam", "Neelankarai", "Abhiramapuram", "CIT Colony"
     ]
+
+    # Supabase sync: reads SUPABASE_URL / SUPABASE_SERVICE_KEY from the
+    # environment (GitHub Actions secrets in CI, a local .env otherwise).
+    # The push is skipped with a warning if either is unset, so the script
+    # still runs standalone (CSV-only) without Supabase configured.
+    SUPABASE_TABLE = "active_listings"
 
 
 # ======================================================================
@@ -63,38 +70,95 @@ def mark_file_as_processed(log_file: str, filename: str) -> None:
 # PDF TEXT EXTRACTION (TEXT + OCR)
 # ======================================================================
 
-def _words_to_column_text(words: list, page_width: float) -> str:
-    """Reconstruct reading-order text from word objects, respecting multi-column layout."""
+def _detect_column_bounds(words: list, page_width: float, page_height: float) -> List[float]:
+    """
+    Detect stable column gutters using per-band coverage voting.
+
+    A single page-wide coverage histogram is fooled by a handful of full-width
+    lines (mastheads, rule lines, section headers): those lines fill in the
+    gutter bins for the whole page and erase an otherwise-consistent column
+    boundary. Instead, coverage is computed per horizontal band and a bin only
+    counts as a gutter if it is empty in most of the bands that actually have
+    content -- so a couple of outlier full-width lines can't destroy a real
+    column boundary.
+    """
     if not words:
-        return ""
+        return [0.0, page_width]
 
-    # Estimate line height from word bounding boxes
-    heights = [w['bottom'] - w['top'] for w in words if w['bottom'] > w['top']]
-    line_h = max(6.0, (sum(heights) / len(heights)) * 0.65) if heights else 9.0
-
-    # Build x-position histogram to locate column separators
-    n_bins = 80
+    n_bins = 200
     bin_size = page_width / n_bins
-    hist = [0] * n_bins
-    for w in words:
-        b = min(int(w['x0'] / bin_size), n_bins - 1)
-        hist[b] += 1
+    band_h = 50.0
+    n_bands = max(1, int(page_height / band_h) + 1)
 
-    # A real column gap must be at least 2 consecutive empty bins (~1.5% page width)
-    # to avoid false splits on word spacing within a column.
+    empty_votes = [0] * n_bins
+    active_bands = 0
+
+    for bi in range(n_bands):
+        y0, y1 = bi * band_h, (bi + 1) * band_h
+        band_words = [w for w in words if y0 <= w['top'] < y1]
+        if not band_words:
+            continue
+        active_bands += 1
+        covered = [False] * n_bins
+        for w in band_words:
+            b0 = max(0, min(n_bins - 1, int(w['x0'] / bin_size)))
+            b1 = max(0, min(n_bins - 1, int(w['x1'] / bin_size)))
+            for b in range(b0, b1 + 1):
+                covered[b] = True
+        for b in range(n_bins):
+            if not covered[b]:
+                empty_votes[b] += 1
+
+    if active_bands == 0:
+        return [0.0, page_width]
+
+    threshold = active_bands * 0.6
+    is_gutter_bin = [empty_votes[b] >= threshold for b in range(n_bins)]
+
+    min_gutter_bins = max(1, int(n_bins * 0.01))
     col_starts = [0.0]
     i = 0
     while i < n_bins:
-        if hist[i] == 0:
+        if is_gutter_bin[i]:
             j = i
-            while j < n_bins and hist[j] == 0:
+            while j < n_bins and is_gutter_bin[j]:
                 j += 1
-            if (j - i) >= 2 and j < n_bins:
-                col_starts.append(j * bin_size)
+            if (j - i) >= min_gutter_bins and 0 < j < n_bins:
+                col_starts.append(((i + j) / 2) * bin_size)
             i = j
         else:
             i += 1
     col_starts.append(page_width)
+    return col_starts
+
+
+def _join_line_words(row_words: list) -> str:
+    """
+    Join words sorted left-to-right into a line of text.
+
+    Some PDFs (this newspaper's export included) break a single word like
+    "UDS" into separate one-character word objects at kerning-pair
+    boundaries, with ~0pt gaps between them, while real word-to-word gaps
+    measure >=0.8pt even at small font sizes. Unconditionally joining every
+    word with a literal space turns "UDS 680" into "U D S 6 8 0"; instead,
+    only insert a space where there's an actual visual gap.
+    """
+    parts = []
+    prev_x1 = None
+    for w in row_words:
+        if prev_x1 is not None and (w['x0'] - prev_x1) > 0.6:
+            parts.append(' ')
+        parts.append(w['text'])
+        prev_x1 = w['x1']
+    return ''.join(parts)
+
+
+def _words_to_column_text(words: list, page_width: float, page_height: float) -> str:
+    """Reconstruct reading-order text from word objects, respecting multi-column layout."""
+    if not words:
+        return ""
+
+    col_starts = _detect_column_bounds(words, page_width, page_height)
 
     def get_col(x):
         for ci in range(len(col_starts) - 1):
@@ -102,37 +166,34 @@ def _words_to_column_text(words: list, page_width: float) -> str:
                 return ci
         return len(col_starts) - 2
 
-    # Bucket each word by (column_index, row_index)
-    buckets: dict = {}
+    columns: dict = {}
     for w in words:
-        key = (get_col(w['x0']), int(w['top'] / line_h))
-        buckets.setdefault(key, []).append(w)
+        columns.setdefault(get_col(w['x0']), []).append(w)
 
-    # Emit lines: column by column, top-to-bottom within each column
+    # Within each column, cluster words into lines by comparing each word's
+    # top to a running reference (not a fixed-width bucket grid) -- a fixed
+    # grid can split one physical line across two buckets when normal glyph
+    # jitter straddles a bucket boundary, then re-merge fragments of
+    # adjacent lines, producing character-interleaved output.
     lines = []
-    for key in sorted(buckets):
-        row_words = sorted(buckets[key], key=lambda w: w['x0'])
-        lines.append(' '.join(w['text'] for w in row_words))
+    for col_idx in sorted(columns):
+        col_words = sorted(columns[col_idx], key=lambda w: (w['top'], w['x0']))
+        current_line: list = []
+        current_top = None
+        for w in col_words:
+            tol = max(2.0, (w['bottom'] - w['top']) * 0.5)
+            if current_top is not None and (w['top'] - current_top) > tol:
+                current_line.sort(key=lambda ww: ww['x0'])
+                lines.append(_join_line_words(current_line))
+                current_line = []
+                current_top = None
+            current_line.append(w)
+            current_top = w['top'] if current_top is None else min(current_top, w['top'])
+        if current_line:
+            current_line.sort(key=lambda ww: ww['x0'])
+            lines.append(_join_line_words(current_line))
 
     return '\n'.join(lines)
-
-
-def _looks_garbled(text: str) -> bool:
-    """Return True if text shows signs of multi-column mixing."""
-    words = [w for w in text.split() if w.isalpha()]
-    if not words:
-        return False
-    # Many single-char words → character-level interleaving
-    single = sum(1 for w in words if len(w) == 1)
-    if (single / len(words)) > 0.20:
-        return True
-    # Multiple bullets on same line → row-across-columns mixing (layout=True artifact)
-    lines = [l for l in text.split('\n') if l.strip()]
-    multi_bullet_lines = sum(
-        1 for l in lines
-        if l.count('•') + l.count('·') + l.count('●') > 1
-    )
-    return multi_bullet_lines > 2
 
 
 def _ocr_page(page) -> str:
@@ -150,8 +211,13 @@ def extract_pdf_text(pdf_path: str) -> str:
     """
     Extract text from each page with multi-column awareness.
     Strategy (in order):
-      1. pdfplumber layout mode (pdfminer LAParams) — handles columns natively
-      2. Word-position column reconstruction — fallback when layout mode unavailable
+      1. Word-position column reconstruction — band-voted gutter detection,
+         robust to the irregular multi-column classifieds layout (see
+         _detect_column_bounds). This is the primary strategy: pdfplumber's
+         layout=True mode zips adjacent columns' text together character-by-
+         character on pages with tightly packed multi-column text.
+      2. pdfplumber layout mode (pdfminer LAParams) — fallback when word
+         extraction is unavailable or empty.
       3. OCR — last resort for scanned/image pages (skipped if Tesseract absent)
     """
     all_text = []
@@ -160,18 +226,18 @@ def extract_pdf_text(pdf_path: str) -> str:
         for page in pdf.pages:
             page_text = ""
 
-            # --- Strategy 1: layout-aware extraction (pdfplumber >= 0.9) ---
-            try:
-                page_text = page.extract_text(layout=True) or ""
-                page_text = page_text.strip()
-            except TypeError:
-                # Older pdfplumber doesn't support layout=True
-                page_text = ""
+            # --- Strategy 1: word-position column reconstruction ---
+            words = page.extract_words(x_tolerance=7, y_tolerance=3)
+            if words:
+                page_text = _words_to_column_text(words, page.width, page.height).strip()
 
-            # --- Strategy 2: word-position column reconstruction ---
-            if len(page_text) < 30 or _looks_garbled(page_text):
-                words = page.extract_words(x_tolerance=7, y_tolerance=3)
-                page_text = _words_to_column_text(words, page.width) if words else ""
+            # --- Strategy 2: layout-aware extraction (pdfplumber >= 0.9) ---
+            if len(page_text) < 30:
+                try:
+                    page_text = (page.extract_text(layout=True) or "").strip()
+                except TypeError:
+                    # Older pdfplumber doesn't support layout=True
+                    page_text = page_text
 
             # --- Strategy 3: OCR (only if text layer is truly absent) ---
             if len(page_text.strip()) < 30:
@@ -220,14 +286,20 @@ def split_listings(raw_text: str) -> List[str]:
                 listings.append(joined)
             current.clear()
 
+    # Some issues' font encoding renders the bullet glyph as a lone lowercase
+    # "l" (not OCR noise -- the surrounding text extracts cleanly). Treat a
+    # line-leading "l " the same as the other bullet characters; no real
+    # classified line starts with the single-letter word "l".
+    bullet_start = re.compile(r"^([·\-\*\.]|l)\s+")
+
     for line in lines:
         # Start of a new listing if:
         # - line starts with bullet or dot
         # - or looks like a typical classified start (ALL CAPS locality + comma)
-        if re.match(r"^[·\-\*\.]\s+", line) or re.match(r"^[A-Z][A-Z\s\.\-]+,", line):
+        if bullet_start.match(line) or re.match(r"^[A-Z][A-Z\s\.\-]+,", line):
             flush_current()
             # remove leading bullet/dot
-            line = re.sub(r"^[·\-\*\.]\s*", "", line)
+            line = bullet_start.sub("", line)
             current.append(line)
         else:
             current.append(line)
@@ -420,6 +492,71 @@ def is_real_estate_listing(text: str) -> bool:
 
 
 # ======================================================================
+# MULTI-PROPERTY LISTING SPLITTING
+# ======================================================================
+
+def looks_like_multi_property(text: str) -> bool:
+    """True if a listing mentions sq.ft or UDS more than once -- a sign that
+    more than one property is bundled into the same bullet/contact number."""
+    sqft_count = len(re.findall(r"sq\.?\s*ft", text, re.IGNORECASE))
+    uds_count = len(re.findall(r"\bUDS\b", text, re.IGNORECASE))
+    return sqft_count >= 2 or uds_count >= 2
+
+
+def split_multi_property_listing(text: str, localities: List[str]) -> List[str]:
+    """
+    Some bulleted classifieds advertise more than one property (often in
+    different localities) under a single shared phone number, e.g.:
+      "MANDAVELI, ... Rate 2.25 crores, Besant Nagar, ... Rate 3.25 crores. Ph: ..."
+    Split such listings into one segment per locality mention, so each
+    property gets its own row, with the shared phone number re-attached to
+    every segment that doesn't already carry it.
+    """
+    if not looks_like_multi_property(text):
+        return [text]
+
+    loc_pattern = re.compile(
+        r"\b(" + "|".join(re.escape(l) for l in localities) + r")\b",
+        re.IGNORECASE,
+    )
+    matches = list(loc_pattern.finditer(text))
+    if len(matches) < 2:
+        return [text]
+
+    # Collapse locality matches that are really the same mention repeated
+    # close together (e.g. "Mandaveli, Mandaveli Extension").
+    starts = [matches[0].start()]
+    for m in matches[1:]:
+        if m.start() - starts[-1] > 15:
+            starts.append(m.start())
+    if len(starts) < 2:
+        return [text]
+
+    segments = []
+    for i, s in enumerate(starts):
+        e = starts[i + 1] if i + 1 < len(starts) else len(text)
+        seg = text[s:e].strip(" ,.")
+        if seg:
+            segments.append(seg)
+    if len(segments) < 2:
+        return [text]
+
+    # Preserve any bullet-intro text before the first locality mention.
+    if starts[0] > 0:
+        prefix = text[: starts[0]].strip(" ,.")
+        if prefix:
+            segments[0] = f"{prefix} {segments[0]}"
+
+    phones = extract_phone(text)
+    if phones:
+        for i, seg in enumerate(segments):
+            if not extract_phone(seg):
+                segments[i] = f"{seg.rstrip('.')} Ph: {phones}"
+
+    return segments
+
+
+# ======================================================================
 # STRUCTURED PROCESSING
 # ======================================================================
 
@@ -433,6 +570,8 @@ def process_listings_to_structured(
     rows = []
     skipped = 0
 
+    split_count = 0
+
     for _, row in df.iterrows():
         src = str(row["source_file"])
         text = clean_text(str(row["Listing"]))
@@ -441,56 +580,61 @@ def process_listings_to_structured(
             skipped += 1
             continue
 
-        bhk = extract_bhk(text)
-        sqft = extract_sqft(text)
-        uds = extract_uds(text)
-        floor = extract_floor(text)
-        facing = extract_facing(text)
-        locality = extract_locality(text, localities)
-        phones = extract_phone(text)
+        parts = split_multi_property_listing(text, localities)
+        if len(parts) > 1:
+            split_count += 1
 
-        is_rent = detect_rental(text)
-        price_val, price_unit = (None, None)
-        price_in_inr = None
-        rent_val, rent_unit, rent_in_inr = (None, None, None)
+        for part in parts:
+            bhk = extract_bhk(part)
+            sqft = extract_sqft(part)
+            uds = extract_uds(part)
+            floor = extract_floor(part)
+            facing = extract_facing(part)
+            locality = extract_locality(part, localities)
+            phones = extract_phone(part)
 
-        if is_rent:
-            rent_val, rent_unit = extract_rent(text)
-            rent_in_inr = normalize_rent(rent_val, rent_unit)
-            price_in_inr = rent_in_inr
-        else:
-            price_val, price_unit = extract_price(text)
-            price_in_inr = normalize_price(price_val, price_unit)
+            is_rent = detect_rental(part)
+            price_val, price_unit = (None, None)
+            price_in_inr = None
+            rent_val, rent_unit, rent_in_inr = (None, None, None)
 
-        if price_in_inr is None:
-            price_in_inr = extract_price_simple(text)
+            if is_rent:
+                rent_val, rent_unit = extract_rent(part)
+                rent_in_inr = normalize_rent(rent_val, rent_unit)
+                price_in_inr = rent_in_inr
+            else:
+                price_val, price_unit = extract_price(part)
+                price_in_inr = normalize_price(price_val, price_unit)
 
-        # For rentals, keep rent_in_inr in sync with the final price_in_inr value
-        if is_rent and price_in_inr is not None:
-            rent_in_inr = price_in_inr
+            if price_in_inr is None:
+                price_in_inr = extract_price_simple(part)
 
-        prop_type = detect_property_type(text)
+            # For rentals, keep rent_in_inr in sync with the final price_in_inr value
+            if is_rent and price_in_inr is not None:
+                rent_in_inr = price_in_inr
 
-        rows.append({
-            "source_file": src,
-            "listing_text": text,
-            "city": "Chennai",
-            "locality": locality or "",
-            "property_type": prop_type,
-            "bhk": bhk or "",
-            "sqft_builtup": sqft or "",
-            "sqft_uds": uds or "",
-            "floor": floor or "",
-            "facing": facing or "",
-            "price_value": price_val or "",
-            "price_unit": price_unit or "",
-            "price_in_inr": price_in_inr or "",
-            "is_rental": is_rent,
-            "rent_value": rent_val or "",
-            "rent_unit": rent_unit or "",
-            "rent_in_inr": rent_in_inr or "",
-            "contact_numbers": phones or "",
-        })
+            prop_type = detect_property_type(part)
+
+            rows.append({
+                "source_file": src,
+                "listing_text": part,
+                "city": "Chennai",
+                "locality": locality or "",
+                "property_type": prop_type,
+                "bhk": bhk or "",
+                "sqft_builtup": sqft or "",
+                "sqft_uds": uds or "",
+                "floor": floor or "",
+                "facing": facing or "",
+                "price_value": price_val or "",
+                "price_unit": price_unit or "",
+                "price_in_inr": price_in_inr or "",
+                "is_rental": is_rent,
+                "rent_value": rent_val or "",
+                "rent_unit": rent_unit or "",
+                "rent_in_inr": rent_in_inr or "",
+                "contact_numbers": phones or "",
+            })
 
     new_df = pd.DataFrame(rows)
 
@@ -503,7 +647,67 @@ def process_listings_to_structured(
     out_df.to_csv(output_csv_path, index=False)
 
     print(f"  → Skipped {skipped} non-real-estate listings")
+    print(f"  → Split {split_count} multi-property listings into separate rows")
     return new_df
+
+
+# ======================================================================
+# SUPABASE SYNC
+# ======================================================================
+
+def _to_supabase_row(row: dict) -> dict:
+    """Convert one structured-CSV row into a JSON-safe payload matching the
+    active_listings schema (every column is `text` except is_rental)."""
+    out = {}
+    for key, value in row.items():
+        if key == "is_rental":
+            out[key] = bool(value)
+        elif value is None or value == "" or (isinstance(value, float) and pd.isna(value)):
+            out[key] = None
+        else:
+            out[key] = str(value)
+    return out
+
+
+def push_new_rows_to_supabase(df: pd.DataFrame, table: str) -> None:
+    """
+    Insert newly extracted rows into the Supabase active_listings table.
+
+    Reads SUPABASE_URL / SUPABASE_SERVICE_KEY from the environment (set as
+    GitHub Actions secrets in CI). The service role key is required because
+    active_listings has no RLS policy allowing anon inserts; it must never be
+    committed to the repo. If either variable is unset, the push is skipped
+    with a warning so the script still works standalone.
+    """
+    if df.empty:
+        print("  → No new rows to push to Supabase")
+        return
+
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    if not url or not key:
+        print("  → SUPABASE_URL / SUPABASE_SERVICE_KEY not set; skipping Supabase push")
+        return
+
+    endpoint = url.rstrip("/") + f"/rest/v1/{table}"
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    payload_rows = [_to_supabase_row(r) for r in df.to_dict(orient="records")]
+
+    batch_size = 500
+    for i in range(0, len(payload_rows), batch_size):
+        batch = payload_rows[i:i + batch_size]
+        resp = requests.post(endpoint, headers=headers, json=batch, timeout=60)
+        if resp.status_code >= 300:
+            raise RuntimeError(
+                f"Supabase insert failed ({resp.status_code}): {resp.text[:500]}"
+            )
+
+    print(f"  → Pushed {len(payload_rows)} new rows to Supabase ({table})")
 
 
 # ======================================================================
@@ -560,6 +764,11 @@ def run_pipeline(config: Config) -> None:
 
     print(f"\nStructured CSV {'updated' if append_mode else 'created'}: {config.STRUCTURED_CSV_OUTPUT}")
     print(f"New structured rows: {len(structured_df)}")
+
+    # Push before marking PDFs as processed: if this raises, the log is left
+    # untouched so the same PDFs are retried (and re-pushed) on the next run
+    # instead of silently losing their rows from Supabase.
+    push_new_rows_to_supabase(structured_df, config.SUPABASE_TABLE)
 
     for pdf_path in new_pdfs:
         mark_file_as_processed(config.PROCESSED_FILES_LOG, os.path.basename(pdf_path))

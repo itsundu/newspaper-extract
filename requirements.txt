@@ -1,0 +1,5 @@
+pandas>=3.0.0
+pdfplumber>=0.11.9
+pytesseract>=0.3.13
+Pillow>=12.1.1
+requests>=2.34.2

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets (Supabase URL/key are read from the environment, never committed)
+.env
+
+# Pipeline transient output (deleted by the script on success; ignored in
+# case a failed run leaves it behind)
+raw_listings_temp.csv
