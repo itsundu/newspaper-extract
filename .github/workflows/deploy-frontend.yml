@@ -20,5 +20,6 @@ jobs:
           server: ${{ secrets.HOSTINGER_FTP_SERVER }}
           username: ${{ secrets.HOSTINGER_FTP_USERNAME }}
           password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
+          protocol: ftps
           local-dir: ./frontend/
-          server-dir: /domains/terralytixai.com/public_html/listings/
+          server-dir: /
