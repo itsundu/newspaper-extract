@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Terralytix Active Listings</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    :root {
+      --bg:         #09090f;
+      --bg2:        #0f1018;
+      --bg3:        #141520;
+      --green:      #34c97d;
+      --green2:     #4adba0;
+      --blue-light: #5b8dee;
+      --text:       #edf0f8;
+      --text2:      #c4cce0;
+      --muted:      #6e7a96;
+      --border:     rgba(255,255,255,0.07);
+      --card:       rgba(255,255,255,0.03);
+      --card-hover: rgba(255,255,255,0.058);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 30px;
+      line-height: 1.6;
+    }
+
+    h2 {
+      font-weight: 700;
+      font-size: 22px;
+      letter-spacing: -0.4px;
+      margin-bottom: 20px;
+      color: var(--text);
+    }
+
+    /* ── Charts ── */
+    .chart-panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+    }
+
+    .chart-panel h3 {
+      margin: 0 0 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    /* ── Table container ── */
+    .table-container {
+      background: #17263d;
+      border: 1px solid rgba(255,255,255,0.14);
+      padding: 20px;
+      border-radius: 16px;
+      overflow-x: auto;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+
+    th {
+      background: #252d42;
+      padding: 11px 12px;
+      font-weight: 700;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #94a3b8;
+      text-align: left;
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      color: var(--text2);
+    }
+
+    tr:nth-child(even) td {
+      background: rgba(255,255,255,0.05);
+    }
+
+    tr:hover td {
+      background: rgba(10, 114, 79, 0.5);
+      color: var(--text);
+    }
+
+    /* ── Filter inputs ── */
+    .filter-row th {
+      background: #252d42;
+      padding: 8px 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+    }
+
+    .filter-row input {
+      width: 100%;
+      padding: 7px 10px;
+      background: #1e2535;
+      border: 1px solid #ee591e;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: var(--text);
+      box-sizing: border-box;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .filter-row input::placeholder { color: #4e5a72; }
+
+    .filter-row input:focus {
+      outline: none;
+      border-color: #f97316;
+      box-shadow: 0 0 0 3px rgba(249,115,22,0.2);
+    }
+
+    /* ── Pagination ── */
+    #pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+      padding: 10px 4px;
+    }
+
+    .page-info {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .page-buttons {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .page-buttons button {
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text2);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .page-buttons button:hover:not(:disabled) {
+      background: var(--card-hover);
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .page-buttons button.active {
+      background: var(--green);
+      color: #0a0e1a;
+      border-color: var(--green);
+      font-weight: 700;
+    }
+
+    .page-buttons button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+
+<body>
+    <!-- NAVBAR -->
+    <header class="navbar">
+        <div class="logo" style="align-self: center;"><a href="https://terralytixai.com">Terralytix AI</a></div>
+    </header>
+    <header class="navbar">
+        <div class="logo"><img src="images/terralytix-logo.png" alt="Terralytix Logo" class="logo-img"> </div>
+      </header>
+
+
+  <h2>Active Real Estate Listings</h2>
+
+    <div class="chart-container" style="display:flex; gap:40px; margin-bottom:30px;">
+
+    <div class="chart-panel" style="width:48%;">
+        <h3>Sale Units: Sqft Builtup vs Price Value</h3>
+        <canvas id="saleScatterChart"></canvas>
+    </div>
+
+    <div class="chart-panel" style="width:48%;">
+        <h3>Rental Units: Sqft Builtup vs Rent Value</h3>
+        <canvas id="rentalScatterChart"></canvas>
+    </div>
+
+    </div>
+
+  <div class="table-container">
+
+    <!-- MAIN TABLE -->
+    <table id="listingsTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Source File</th>
+          <th>Listing Text</th>
+          <th>City</th>
+          <th>Locality</th>
+          <th>Property Type</th>
+          <th>BHK</th>
+          <th>Sqft Builtup</th>
+          <th>Sqft UDS</th>
+          <th>Floor</th>
+          <th>Facing</th>
+          <th>Price (INR)</th>
+          <th>Is Rental</th>
+          <th>Rent Unit</th>
+          <th>Rent (INR)</th>
+          <th>Contact Numbers</th>
+        </tr>
+        <tr class="filter-row">
+          <th><input id="filter_ID" placeholder="ID"></th>
+          <th><input id="filter_source_file" placeholder="Source"></th>
+          <th><input id="filter_listing_text" placeholder="Listing Text"></th>
+          <th><input id="filter_city" placeholder="City"></th>
+          <th><input id="filter_locality" placeholder="Locality"></th>
+          <th><input id="filter_property_type" placeholder="Type"></th>
+          <th><input id="filter_bhk" placeholder="BHK"></th>
+          <th><input id="filter_sqft_builtup" placeholder="Builtup"></th>
+          <th><input id="filter_sqft_uds" placeholder="UDS"></th>
+          <th><input id="filter_floor" placeholder="Floor"></th>
+          <th><input id="filter_facing" placeholder="Facing"></th>
+          <th><input id="filter_price_in_inr" placeholder="INR"></th>
+          <th><input id="filter_is_rental" placeholder="Rental"></th>
+          <th><input id="filter_rent_unit" placeholder="Rent Unit"></th>
+          <th><input id="filter_rent_in_inr" placeholder="Rent INR"></th>
+          <th><input id="filter_contact_numbers" placeholder="Contact"></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="pagination"></div>
+  </div>
+
+<script>
+  const supabaseClient = supabase.createClient(
+    "https://ivxftbgzxxdacizxwnhc.supabase.co",
+    "sb_publishable_ZQzA66pSAJvAV07BHaLZDg_OLxHdcnO"
+  );
+
+  let fullData = [];
+  let displayData = [];
+  let currentPage = 1;
+  const PAGE_SIZE = 50;
+
+  async function loadListings() {
+    const { data, error } = await supabaseClient
+      .from("active_listings")
+      .select("*")
+      .order("ID", { ascending: false });
+
+    if (error) {
+      console.error("Supabase error:", error);
+      return;
+    }
+
+    fullData = data;
+    applyFilters();
+    renderScatterCharts(fullData);
+  }
+
+  const tableColumns = [
+    "ID",
+    "source_file",
+    "listing_text",
+    "city",
+    "locality",
+    "property_type",
+    "bhk",
+    "sqft_builtup",
+    "sqft_uds",
+    "floor",
+    "facing",
+    "price_in_inr",
+    "is_rental",
+    "rent_unit",
+    "rent_in_inr",
+    "contact_numbers"
+  ];
+
+  function getTableValue(row, key) {
+    if (key === "is_rental") return row.is_rental ? "Yes" : "No";
+    return row[key] ?? "";
+  }
+
+  function getFilterValue(row, key) {
+    if (key === "is_rental") {
+      return row.is_rental ? "Yes true rental 1" : "No false sale 0";
+    }
+    return String(getTableValue(row, key));
+  }
+
+  function renderTable(rows) {
+    displayData = rows;
+    currentPage = 1;
+    renderCurrentPage();
+  }
+
+  function renderCurrentPage() {
+    const tbody = document.querySelector("#listingsTable tbody");
+    tbody.innerHTML = "";
+
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const slice = displayData.slice(start, start + PAGE_SIZE);
+
+    slice.forEach(row => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${getTableValue(row, "ID")}</td>
+        <td>${getTableValue(row, "source_file")}</td>
+        <td>${getTableValue(row, "listing_text")}</td>
+        <td>${getTableValue(row, "city")}</td>
+        <td>${getTableValue(row, "locality")}</td>
+        <td>${getTableValue(row, "property_type")}</td>
+        <td>${getTableValue(row, "bhk")}</td>
+        <td>${getTableValue(row, "sqft_builtup")}</td>
+        <td>${getTableValue(row, "sqft_uds")}</td>
+        <td>${getTableValue(row, "floor")}</td>
+        <td>${getTableValue(row, "facing")}</td>
+        <td>${getTableValue(row, "price_in_inr")}</td>
+        <td>${getTableValue(row, "is_rental")}</td>
+        <td>${getTableValue(row, "rent_unit")}</td>
+        <td>${getTableValue(row, "rent_in_inr")}</td>
+        <td>${getTableValue(row, "contact_numbers")}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    renderPagination();
+  }
+
+  function renderPagination() {
+    const total = displayData.length;
+    const totalPages = Math.ceil(total / PAGE_SIZE);
+    const pag = document.getElementById("pagination");
+
+    if (totalPages <= 1) {
+      pag.innerHTML = `<span class="page-info">Showing all ${total} record${total !== 1 ? "s" : ""}</span>`;
+      return;
+    }
+
+    const start = (currentPage - 1) * PAGE_SIZE + 1;
+    const end = Math.min(currentPage * PAGE_SIZE, total);
+
+    let html = `<span class="page-info">Showing ${start}–${end} of ${total} records</span>`;
+    html += `<div class="page-buttons">`;
+    html += `<button onclick="goToPage(1)" ${currentPage === 1 ? "disabled" : ""}>«</button>`;
+    html += `<button onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? "disabled" : ""}>‹ Prev</button>`;
+
+    const delta = 2;
+    const rangeStart = Math.max(1, currentPage - delta);
+    const rangeEnd = Math.min(totalPages, currentPage + delta);
+    if (rangeStart > 1) html += `<button onclick="goToPage(1)">1</button>${rangeStart > 2 ? '<span style="padding:5px 4px;color:#aaa;">…</span>' : ""}`;
+    for (let p = rangeStart; p <= rangeEnd; p++) {
+      html += `<button onclick="goToPage(${p})" class="${p === currentPage ? "active" : ""}">${p}</button>`;
+    }
+    if (rangeEnd < totalPages) html += `${rangeEnd < totalPages - 1 ? '<span style="padding:5px 4px;color:#aaa;">…</span>' : ""}<button onclick="goToPage(${totalPages})">${totalPages}</button>`;
+
+    html += `<button onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? "disabled" : ""}>Next ›</button>`;
+    html += `<button onclick="goToPage(${totalPages})" ${currentPage === totalPages ? "disabled" : ""}>»</button>`;
+    html += `</div>`;
+
+    pag.innerHTML = html;
+  }
+
+  function goToPage(page) {
+    const totalPages = Math.ceil(displayData.length / PAGE_SIZE);
+    currentPage = Math.max(1, Math.min(page, totalPages));
+    renderCurrentPage();
+    document.querySelector(".table-container").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  let saleScatterChart = null;
+let rentalScatterChart = null;
+
+function cleanNumber(value) {
+  if (!value) return null;
+
+  let v = String(value).trim().toLowerCase();
+
+  // Remove commas
+  v = v.replace(/,/g, "");
+
+  // Convert crore → number
+  if (v.includes("crore") || v.includes("cr")) {
+    v = v.replace(/[^0-9.]/g, "");
+    return Number(v) * 10000000; // 1 crore = 10M
+  }
+
+  // Convert lakh → number  (only match "lakh"/"lakhs" or bare trailing "l", not any word containing "l")
+  if (v.includes("lakh") || v.includes("lakhs") || /^\d[\d,.]*\s*l$/.test(v)) {
+    v = v.replace(/[^0-9.]/g, "");
+    return Number(v) * 100000;
+  }
+
+  // Convert K → thousand
+  if (v.includes("k")) {
+    v = v.replace(/[^0-9.]/g, "");
+    return Number(v) * 1000;
+  }
+
+  // Remove any remaining non-numeric characters
+  v = v.replace(/[^0-9.]/g, "");
+
+  const num = Number(v);
+  return isNaN(num) ? null : num;
+}
+
+function darkChartOptions(xLabel, yLabel) {
+  const textColor  = "#cbd5e1";
+  const gridColor  = "rgba(148,163,184,0.12)";
+  const tickColor  = "#94a3b8";
+  return {
+    responsive: true,
+    plugins: {
+      legend: {
+        labels: { color: textColor, font: { size: 12 } }
+      }
+    },
+    scales: {
+      x: {
+        title: { display: true, text: xLabel, color: textColor, font: { size: 12, weight: "600" } },
+        ticks: { color: tickColor },
+        grid:  { color: gridColor }
+      },
+      y: {
+        title: { display: true, text: yLabel, color: textColor, font: { size: 12, weight: "600" } },
+        ticks: { color: tickColor },
+        grid:  { color: gridColor }
+      }
+    }
+  };
+}
+
+function iqrFilter(points) {
+  if (points.length < 4) return points;
+  function bounds(vals) {
+    const s = [...vals].sort((a, b) => a - b);
+    const q1 = s[Math.floor(s.length * 0.25)];
+    const q3 = s[Math.floor(s.length * 0.75)];
+    const iqr = q3 - q1;
+    return { lo: q1 - 3 * iqr, hi: q3 + 3 * iqr };
+  }
+  const xb = bounds(points.map(p => p.x));
+  const yb = bounds(points.map(p => p.y));
+  return points.filter(p => p.x >= xb.lo && p.x <= xb.hi && p.y >= yb.lo && p.y <= yb.hi);
+}
+
+function renderScatterCharts(rows) {
+  // is_rental may arrive as boolean true/false, integer 1/0, or null — normalise with !!
+  const saleData = iqrFilter(rows
+    .filter(r => !r.is_rental)
+    .map(r => ({ x: cleanNumber(r.sqft_builtup), y: cleanNumber(r.price_in_inr) }))
+    .filter(p => p.x !== null && p.y !== null && p.x > 0 && p.y > 0));
+
+  const rentalData = iqrFilter(rows
+    .filter(r => !!r.is_rental)
+    .map(r => ({ x: cleanNumber(r.sqft_builtup), y: cleanNumber(r.rent_in_inr) }))
+    .filter(p => p.x !== null && p.y !== null && p.x > 0 && p.y > 0));
+
+  const saleCtx   = document.getElementById("saleScatterChart").getContext("2d");
+  const rentalCtx = document.getElementById("rentalScatterChart").getContext("2d");
+
+  if (saleScatterChart)   saleScatterChart.destroy();
+  if (rentalScatterChart) rentalScatterChart.destroy();
+
+  saleScatterChart = new Chart(saleCtx, {
+    type: "scatter",
+    data: {
+      datasets: [{
+        label: "Sale Units",
+        data: saleData,
+        backgroundColor: "rgba(96,165,250,0.75)",
+        pointRadius: 4,
+        pointHoverRadius: 6
+      }]
+    },
+    options: darkChartOptions("Sqft Builtup", "Price (INR)")
+  });
+
+  rentalScatterChart = new Chart(rentalCtx, {
+    type: "scatter",
+    data: {
+      datasets: [{
+        label: "Rental Units",
+        data: rentalData,
+        backgroundColor: "rgba(74,222,128,0.75)",
+        pointRadius: 4,
+        pointHoverRadius: 6
+      }]
+    },
+    options: darkChartOptions("Sqft Builtup", "Rent (INR)")
+  });
+}
+
+
+
+  function applyFilters() {
+    const val = id => (document.getElementById(id)?.value || "").toLowerCase().trim();
+
+    const f = {
+      ID:              val("filter_ID"),
+      source_file:     val("filter_source_file"),
+      listing_text:    val("filter_listing_text"),
+      city:            val("filter_city"),
+      locality:        val("filter_locality"),
+      property_type:   val("filter_property_type"),
+      bhk:             val("filter_bhk"),
+      sqft_builtup:    val("filter_sqft_builtup"),
+      sqft_uds:        val("filter_sqft_uds"),
+      floor:           val("filter_floor"),
+      facing:          val("filter_facing"),
+      price_in_inr:    val("filter_price_in_inr"),
+      is_rental:       val("filter_is_rental"),
+      rent_unit:       val("filter_rent_unit"),
+      rent_in_inr:     val("filter_rent_in_inr"),
+      contact_numbers: val("filter_contact_numbers"),
+    };
+
+    const textFields = tableColumns;
+
+    const filtered = fullData.filter(row => {
+      for (const key of textFields) {
+        if (f[key] && !getFilterValue(row, key).toLowerCase().includes(f[key])) return false;
+      }
+      return true;
+    });
+
+    renderTable(filtered);
+  }
+
+  document.getElementById("listingsTable").addEventListener("input", function(e) {
+    if (e.target.tagName === "INPUT") applyFilters();
+  });
+
+  loadListings();
+  setInterval(loadListings, 30000);
+
+  supabaseClient
+    .channel("active_listings_changes")
+    .on("postgres_changes", { event: "*", schema: "public", table: "active_listings" }, () => loadListings())
+    .subscribe();
+</script>
+
+</body>
+</html>
