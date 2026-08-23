@@ -12,6 +12,7 @@ import os
 import re
 import csv
 import glob
+from functools import lru_cache
 from typing import List, Tuple, Optional
 
 import pandas as pd
@@ -20,6 +21,34 @@ import requests
 import pdfplumber
 import pytesseract
 from PIL import Image
+
+
+# ======================================================================
+# LOCALITIES
+# ======================================================================
+
+# Aliases known to occur in this newspaper's classifieds but not already
+# covered by chennai_localities.csv -- either missing outright ("MRC Nagar",
+# "Mandavelipakkam" -- a distinct locality from "Mandaveli", not a typo of
+# it), or written differently than the CSV's form ("San Thome" vs
+# "Santhome", "R A Puram"/"R.A.Puram" vs "Raja Annamalaipuram (RA Puram)",
+# "Abiramapuram" -- this newspaper's more common spelling -- vs the CSV's
+# "Abhiramapuram", "Pallikarnai" vs the CSV's "Pallikaranai").
+_EXTRA_LOCALITY_ALIASES = [
+    "MRC Nagar", "San Thome", "R A Puram", "R.A.Puram",
+    "Abiramapuram", "Mandavelipakkam", "Pallikarnai",
+]
+
+
+def _load_localities() -> List[str]:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chennai_localities.csv")
+    with open(path, "r", encoding="utf-8") as f:
+        names = [line.strip() for line in f if line.strip()]
+    existing_lower = {n.lower() for n in names}
+    for alias in _EXTRA_LOCALITY_ALIASES:
+        if alias.lower() not in existing_lower:
+            names.append(alias)
+    return names
 
 
 # ======================================================================
@@ -32,11 +61,7 @@ class Config:
     STRUCTURED_CSV_OUTPUT = "structured_real_estate_accumulated.csv"
     PROCESSED_FILES_LOG = "processed_pdfs.txt"
 
-    LOCALITIES = [
-        "Mylapore", "Mandaveli", "Adyar", "Besant Nagar", "R.A.Puram",
-        "San Thome", "Alwarpet", "Thiruvanmiyur", "Gopalapuram",
-        "MRC Nagar", "Pallikarnai", "Velachery", "Kottivakkam", "Neelankarai", "Abhiramapuram", "CIT Colony"
-    ]
+    LOCALITIES = _load_localities()
 
     # Supabase sync: reads SUPABASE_URL / SUPABASE_SERVICE_KEY from the
     # environment (GitHub Actions secrets in CI, a local .env otherwise).
@@ -445,12 +470,57 @@ def extract_price_simple(text: str) -> Optional[int]:
     return None
 
 
+def _normalize_locality_key(s: str) -> str:
+    """Lowercase, drop periods, collapse whitespace -- for matching a locality
+    name loosely against however this newspaper happens to punctuate it."""
+    s = s.replace(".", "")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.lower()
+
+
+def _locality_name_variants(name: str) -> List[str]:
+    """Expand a "Long Name (Short Alias)" entry into its two matchable forms."""
+    m = re.match(r"^(.*?)\s*\(([^)]+)\)\s*$", name.strip())
+    if m:
+        return [m.group(1).strip(), m.group(2).strip()]
+    return [name.strip()]
+
+
+@lru_cache(maxsize=8)
+def _build_locality_index(localities: Tuple[str, ...]):
+    """
+    Build (compiled_regex, key_to_canonical) once per distinct localities
+    tuple (cached, since this is called once per listing). The regex matches
+    a locality name in raw extracted PDF text tolerant of missing periods and
+    irregular inter-word spacing -- e.g. "T. Nagar" also matches "T Nagar" /
+    "T NAGAR". key_to_canonical maps the normalized matched text back to the
+    display name from the source list.
+    """
+    fragments = []
+    key_to_canonical = {}
+    for name in localities:
+        canonical = name.strip()
+        if not canonical:
+            continue
+        for variant in _locality_name_variants(canonical):
+            parts = [p for p in re.split(r"\s+", variant) if p]
+            if not parts:
+                continue
+            fragment = r"\s+".join(re.escape(p.rstrip(".")) + r"\.?" for p in parts)
+            fragments.append(fragment)
+            key_to_canonical[_normalize_locality_key(variant)] = canonical
+    # Longer fragments first so "Anna Nagar West" wins over "Anna Nagar" when both apply.
+    fragments.sort(key=len, reverse=True)
+    pattern = re.compile(r"\b(" + "|".join(fragments) + r")\b", re.IGNORECASE)
+    return pattern, key_to_canonical
+
+
 def extract_locality(text: str, localities: List[str]) -> Optional[str]:
-    t = text.lower()
-    for loc in localities:
-        if loc.lower() in t:
-            return loc
-    return None
+    pattern, key_to_canonical = _build_locality_index(tuple(localities))
+    m = pattern.search(text)
+    if not m:
+        return None
+    return key_to_canonical.get(_normalize_locality_key(m.group(0)))
 
 
 def detect_property_type(text: str) -> str:
@@ -515,10 +585,7 @@ def split_multi_property_listing(text: str, localities: List[str]) -> List[str]:
     if not looks_like_multi_property(text):
         return [text]
 
-    loc_pattern = re.compile(
-        r"\b(" + "|".join(re.escape(l) for l in localities) + r")\b",
-        re.IGNORECASE,
-    )
+    loc_pattern, _ = _build_locality_index(tuple(localities))
     matches = list(loc_pattern.finditer(text))
     if len(matches) < 2:
         return [text]
