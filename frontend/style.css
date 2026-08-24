@@ -57,6 +57,53 @@ section.fade-visible {
 
 }
 
+/* Dark-mode tokens, matching src/app/globals.css's dark palette. Applied
+   automatically via OS preference, or forced by [data-theme] when the user
+   picks a theme with index.html's toggle. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #090b12;
+    --bg-alt: #131a2c;
+    --card-bg: #0e1220;
+    --accent: #1fd6a3;
+    --accent-soft: rgba(31, 214, 163, 0.12);
+    --text: #eef1f8;
+    --muted: #8b93ac;
+    --border: rgba(255, 255, 255, 0.08);
+    --shadow-soft: 0 18px 45px rgba(0, 0, 0, 0.4);
+
+    --primary-blue: #7fa8f5;
+    --primary-green: #1fd6a3;
+    --dark-bg: #090b12;
+    --light-bg: #131a2c;
+    --text-light: #eef1f8;
+    --text-muted: #8b93ac;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #090b12;
+  --bg-alt: #131a2c;
+  --card-bg: #0e1220;
+  --accent: #1fd6a3;
+  --accent-soft: rgba(31, 214, 163, 0.12);
+  --text: #eef1f8;
+  --muted: #8b93ac;
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow-soft: 0 18px 45px rgba(0, 0, 0, 0.4);
+
+  --primary-blue: #7fa8f5;
+  --primary-green: #1fd6a3;
+  --dark-bg: #090b12;
+  --light-bg: #131a2c;
+  --text-light: #eef1f8;
+  --text-muted: #8b93ac;
+}
+
+html {
+  color-scheme: light dark;
+}
+
 *,
 *::before,
 *::after {

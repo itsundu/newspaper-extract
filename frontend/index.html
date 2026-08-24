@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Terralytix Active Listings</title>
+  <title>Property Radar</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,14 +13,15 @@
 
   <style>
     :root {
-      /* Matches src/app/globals.css light-mode tokens in the main
-         terralytixAI Next.js app, so this page reads as part of the
-         same product rather than a separate style. */
+      /* Blue/green pulled from PropertyRadar_Logo-noBG.png (navy ring +
+         wordmark, green house/arrow + "Radar") so the page reads as an
+         extension of the logo rather than a mismatched teal accent. */
       --bg:         #f6f7fb;
       --bg2:        #ffffff;
       --bg3:        #eef0f6;
-      --green:      #0f9d78;
-      --green2:     #14b98c;
+      --green:      #4ca22f;
+      --green2:     #3f8a26;
+      --navy:       #10284f;
       --blue-light: #5b8dee;
       --text:       #0f1120;
       --text2:      #3b4257;
@@ -28,7 +29,61 @@
       --border:     rgba(15,17,32,0.09);
       --card:       #ffffff;
       --card-hover: #f6f7fb;
+      --row-alt:    rgba(15,17,32,0.025);
+      --row-hover:  rgba(76,162,47,0.10);
+      --chart-text: #3b4257;
+      --chart-grid: rgba(15,17,32,0.08);
+      --chart-tick: #5b6482;
     }
+
+    /* Dark-mode tokens, matching src/app/globals.css's dark palette.
+       Applied automatically via OS preference, or forced by [data-theme]
+       when the user picks a theme with the toggle below. */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg:         #090b12;
+        --bg2:        #0e1220;
+        --bg3:        #131a2c;
+        --green:      #6cc24a;
+        --green2:     #4fe3ba;
+        --navy:       #7fa8f5;
+        --blue-light: #7fa8f5;
+        --text:       #eef1f8;
+        --text2:      #c3c9dc;
+        --muted:      #8b93ac;
+        --border:     rgba(255,255,255,0.08);
+        --card:       #0e1220;
+        --card-hover: #131a2c;
+        --row-alt:    rgba(255,255,255,0.03);
+        --row-hover:  rgba(108,194,74,0.14);
+        --chart-text: #c3c9dc;
+        --chart-grid: rgba(255,255,255,0.08);
+        --chart-tick: #8b93ac;
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --bg:         #090b12;
+      --bg2:        #0e1220;
+      --bg3:        #131a2c;
+      --green:      #6cc24a;
+      --green2:     #4fe3ba;
+      --navy:       #7fa8f5;
+      --blue-light: #7fa8f5;
+      --text:       #eef1f8;
+      --text2:      #c3c9dc;
+      --muted:      #8b93ac;
+      --border:     rgba(255,255,255,0.08);
+      --card:       #0e1220;
+      --card-hover: #131a2c;
+      --row-alt:    rgba(255,255,255,0.03);
+      --row-hover:  rgba(108,194,74,0.14);
+      --chart-text: #c3c9dc;
+      --chart-grid: rgba(255,255,255,0.08);
+      --chart-tick: #8b93ac;
+    }
+
+    html { color-scheme: light dark; }
 
     *, *::before, *::after { box-sizing: border-box; }
 
@@ -38,6 +93,7 @@
       color: var(--text);
       padding: 30px;
       line-height: 1.6;
+      transition: background 0.2s, color 0.2s;
     }
 
     h2 {
@@ -53,6 +109,7 @@
       display: flex;
       flex-wrap: wrap;
       gap: 24px;
+      margin-top: 28px;
       margin-bottom: 24px;
     }
 
@@ -120,11 +177,11 @@
     }
 
     tr:nth-child(even) td {
-      background: rgba(15,17,32,0.025);
+      background: var(--row-alt);
     }
 
     tr:hover td {
-      background: rgba(15, 157, 120, 0.10);
+      background: var(--row-hover);
       color: var(--text);
     }
 
@@ -153,7 +210,7 @@
     .filter-row input:focus {
       outline: none;
       border-color: var(--green);
-      box-shadow: 0 0 0 3px rgba(15,157,120,0.18);
+      box-shadow: 0 0 0 3px rgba(76,162,47,0.18);
     }
 
     /* ── Pagination ── */
@@ -207,20 +264,134 @@
       opacity: 0.3;
       cursor: not-allowed;
     }
+
+    .site-footer {
+      /* style.css has a generic `footer { position: fixed; ... }` rule for
+         the marketing site's footer; override it here so this footer sits
+         in normal document flow instead of pinning to the viewport bottom
+         and covering the pagination controls above it. */
+      position: static;
+      bottom: auto;
+      left: auto;
+      width: auto;
+      z-index: auto;
+      margin-top: 32px;
+      padding: 18px 20px;
+      text-align: center;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+    .site-footer a { color: var(--green); text-decoration: none; font-weight: 600; }
+    .site-footer a:hover { text-decoration: underline; }
+    .site-footer div + div { margin-top: 6px; }
+
+    /* ── Theme toggle ── */
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      color: var(--text2);
+      border-radius: 999px;
+      font-size: 13px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .theme-toggle:hover {
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    /* ── Navbar layout: brand block (logo+title, tagline below) on the
+       left, subsidiary link + theme toggle pinned right ── */
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .brand-block .logo {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* Title + tagline as a tight column next to the logo mark, vertically
+       centered as a group rather than stretched to the logo's full height. */
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    /* .logo (style.css) sets bold/uppercase/letter-spacing for the brand
+       name; reset those on the tagline now that it's nested inside .logo. */
+    .brand-name {
+      font-size: 1.1rem;
+    }
+
+    .navbar-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .tagline {
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: normal;
+      font-size: 13px;
+      color: var(--muted);
+      font-style: italic;
+      white-space: nowrap;
+    }
+
+    .subsidiary-link {
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .subsidiary-link a {
+      color: var(--green);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .subsidiary-link a:hover { text-decoration: underline; }
   </style>
 </head>
 
 <body>
     <!-- NAVBAR -->
     <header class="navbar">
-        <a href="https://terralytixai.com" class="logo" style="display:flex; align-items:center; gap:10px;">
-          <img src="images/terralytix-logo.png" alt="Terralytix Logo" class="logo-img" style="height:30px;">
-          <span>Terralytix AI</span>
-        </a>
+        <div class="brand-block">
+          <a href="index.html" class="logo">
+            <img src="LogoNoText-noBG.png" alt="Property Radar Logo" class="logo-img" style="height:120px;">
+            <span class="brand-text">
+              <span class="brand-name"><span style="color:var(--navy);">Property</span> <span style="color:var(--green);">Radar</span></span>
+              <span class="tagline">Scan the Market. Spot the Opportunity.</span>
+            </span>
+          </a>
+        </div>
+        <div class="navbar-right">
+          <span class="subsidiary-link">A subsidiary of <a href="https://terralytixai.com" target="_blank" rel="noopener">TERRALYTIX</a></span>
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle light/dark theme">
+            <span id="themeToggleIcon">🌙</span> <span id="themeToggleLabel">Dark</span>
+          </button>
+        </div>
     </header>
-
-
-  <h2>Active Real Estate Listings</h2>
 
     <div class="chart-container">
 
@@ -303,7 +474,62 @@
     <div id="pagination"></div>
   </div>
 
+  <footer class="site-footer">
+    <div>Property Radar is a subsidiary of <a href="https://terralytixai.com" target="_blank" rel="noopener">TERRALYTIX</a></div>
+    <div>Site designed &amp; maintained by <a href="https://www.SundarDesignStudio.com" target="_blank" rel="noopener">www.SundarDesignStudio.com</a></div>
+  </footer>
+
 <script>
+  // ── Theme toggle ──
+  // No stored preference: follow the OS via prefers-color-scheme (handled in
+  // CSS). Once the user picks explicitly, remember it and force that theme
+  // regardless of OS setting.
+  const THEME_KEY = "terralytix_theme";
+
+  function systemPrefersDark() {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  function currentTheme() {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+    return systemPrefersDark() ? "dark" : "light";
+  }
+
+  function applyTheme(theme, { persist } = {}) {
+    if (persist) {
+      localStorage.setItem(THEME_KEY, theme);
+      document.documentElement.setAttribute("data-theme", theme);
+    } else if (localStorage.getItem(THEME_KEY)) {
+      document.documentElement.setAttribute("data-theme", localStorage.getItem(THEME_KEY));
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+
+    const icon  = document.getElementById("themeToggleIcon");
+    const label = document.getElementById("themeToggleLabel");
+    if (theme === "dark") {
+      icon.textContent = "☀️";
+      label.textContent = "Light";
+    } else {
+      icon.textContent = "🌙";
+      label.textContent = "Dark";
+    }
+  }
+
+  applyTheme(currentTheme());
+
+  document.getElementById("themeToggle").addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    applyTheme(next, { persist: true });
+    // Chart.js bakes text/grid colors into the chart at creation time, so
+    // re-render using the freshly-applied theme's CSS variables.
+    if (fullData.length) {
+      renderScatterCharts(fullData);
+      renderHistograms(fullData);
+    }
+  });
+
   const supabaseClient = supabase.createClient(
     "https://ivxftbgzxxdacizxwnhc.supabase.co",
     "sb_publishable_ZQzA66pSAJvAV07BHaLZDg_OLxHdcnO"
@@ -456,6 +682,66 @@
     document.querySelector(".table-container").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  // ── Logo watermark on every chart (top-right corner) ──
+  // Chart.js has no CSS access, so the watermark is drawn onto the canvas
+  // itself via a plugin. A white silhouette variant is generated for dark
+  // mode, since the logo's navy is otherwise invisible on a dark panel.
+  const brandLogoImg = new Image();
+  brandLogoImg.src = "PropertyRadar_Logo-noBG.png";
+  let brandLogoWhite = null;
+
+  function tintImageWhite(img) {
+    const off = document.createElement("canvas");
+    off.width = img.naturalWidth;
+    off.height = img.naturalHeight;
+    const octx = off.getContext("2d");
+    octx.drawImage(img, 0, 0);
+    octx.globalCompositeOperation = "source-atop";
+    octx.fillStyle = "#ffffff";
+    octx.fillRect(0, 0, off.width, off.height);
+    return off;
+  }
+
+  function redrawAllCharts() {
+    [saleScatterChart, rentalScatterChart, sqftHistChart, priceHistChart, rentHistChart]
+      .forEach(c => c && c.draw());
+  }
+
+  brandLogoImg.onload = () => {
+    brandLogoWhite = tintImageWhite(brandLogoImg);
+    redrawAllCharts();
+  };
+
+  function isDarkTheme() {
+    const forced = document.documentElement.getAttribute("data-theme");
+    if (forced) return forced === "dark";
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  const brandWatermarkPlugin = {
+    id: "brandWatermark",
+    afterDraw(chart) {
+      if (!brandLogoImg.complete || !brandLogoImg.naturalWidth || !chart.chartArea) return;
+
+      const dark = isDarkTheme();
+      const img = dark && brandLogoWhite ? brandLogoWhite : brandLogoImg;
+      // Scale with the chart's own size (~35% of its shorter side) instead
+      // of a fixed pixel size, so it stays legible on both the large
+      // scatter charts and the narrower 3-up histograms.
+      const w = Math.max(90, Math.min(170, Math.min(chart.chartArea.width, chart.chartArea.height) * 0.35));
+      const h = w * (brandLogoImg.naturalHeight / brandLogoImg.naturalWidth);
+      const x = chart.chartArea.right - w - 8;
+      const y = chart.chartArea.top + 8;
+
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.globalAlpha = dark ? 0.22 : 0.13;
+      ctx.drawImage(img, x, y, w, h);
+      ctx.restore();
+    }
+  };
+  Chart.register(brandWatermarkPlugin);
+
   let saleScatterChart = null;
 let rentalScatterChart = null;
 
@@ -493,9 +779,10 @@ function cleanNumber(value) {
 }
 
 function darkChartOptions(xLabel, yLabel) {
-  const textColor  = "#3b4257";
-  const gridColor  = "rgba(15,17,32,0.08)";
-  const tickColor  = "#5b6482";
+  const styles = getComputedStyle(document.documentElement);
+  const textColor  = styles.getPropertyValue("--chart-text").trim() || "#3b4257";
+  const gridColor  = styles.getPropertyValue("--chart-grid").trim() || "rgba(15,17,32,0.08)";
+  const tickColor  = styles.getPropertyValue("--chart-tick").trim() || "#5b6482";
   return {
     responsive: true,
     plugins: {
