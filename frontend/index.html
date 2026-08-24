@@ -13,21 +13,21 @@
 
   <style>
     :root {
-      /* Matches src/app/globals.css dark-mode tokens in the main
+      /* Matches src/app/globals.css light-mode tokens in the main
          terralytixAI Next.js app, so this page reads as part of the
          same product rather than a separate style. */
-      --bg:         #090b12;
-      --bg2:        #0e1220;
-      --bg3:        #131a2c;
-      --green:      #1fd6a3;
-      --green2:     #4fe3ba;
+      --bg:         #f6f7fb;
+      --bg2:        #ffffff;
+      --bg3:        #eef0f6;
+      --green:      #0f9d78;
+      --green2:     #14b98c;
       --blue-light: #5b8dee;
-      --text:       #eef1f8;
-      --text2:      #b7c0d6;
-      --muted:      #8b93ac;
-      --border:     rgba(255,255,255,0.08);
-      --card:       rgba(255,255,255,0.03);
-      --card-hover: rgba(255,255,255,0.058);
+      --text:       #0f1120;
+      --text2:      #3b4257;
+      --muted:      #5b6482;
+      --border:     rgba(15,17,32,0.09);
+      --card:       #ffffff;
+      --card-hover: #f6f7fb;
     }
 
     *, *::before, *::after { box-sizing: border-box; }
@@ -68,11 +68,11 @@
     /* ── Table container ── */
     .table-container {
       background: var(--bg2);
-      border: 1px solid rgba(255,255,255,0.14);
+      border: 1px solid var(--border);
       padding: 20px;
       border-radius: 16px;
       overflow-x: auto;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      box-shadow: 0 4px 24px rgba(15,17,32,0.08);
     }
 
     table {
@@ -89,9 +89,9 @@
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.8px;
-      color: #94a3b8;
+      color: var(--muted);
       text-align: left;
-      border-bottom: 1px solid rgba(255,255,255,0.10);
+      border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
       z-index: 2;
@@ -99,24 +99,24 @@
 
     td {
       padding: 10px 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.07);
+      border-bottom: 1px solid var(--border);
       color: var(--text2);
     }
 
     tr:nth-child(even) td {
-      background: rgba(255,255,255,0.05);
+      background: rgba(15,17,32,0.025);
     }
 
     tr:hover td {
-      background: rgba(31, 214, 163, 0.12);
+      background: rgba(15, 157, 120, 0.10);
       color: var(--text);
     }
 
     /* ── Filter inputs ── */
     .filter-row th {
-      background: #252d42;
+      background: var(--bg3);
       padding: 8px 8px 10px;
-      border-bottom: 1px solid rgba(255,255,255,0.10);
+      border-bottom: 1px solid var(--border);
     }
 
     .filter-row input {
@@ -132,12 +132,12 @@
       transition: border-color 0.2s, box-shadow 0.2s;
     }
 
-    .filter-row input::placeholder { color: #4e5a72; }
+    .filter-row input::placeholder { color: var(--muted); }
 
     .filter-row input:focus {
       outline: none;
       border-color: var(--green);
-      box-shadow: 0 0 0 3px rgba(31,214,163,0.2);
+      box-shadow: 0 0 0 3px rgba(15,157,120,0.18);
     }
 
     /* ── Pagination ── */
@@ -165,7 +165,7 @@
     .page-buttons button {
       padding: 6px 12px;
       border: 1px solid var(--border);
-      background: var(--card);
+      background: var(--bg3);
       color: var(--text2);
       border-radius: 8px;
       font-size: 13px;
@@ -182,7 +182,7 @@
 
     .page-buttons button.active {
       background: var(--green);
-      color: #0a0e1a;
+      color: #ffffff;
       border-color: var(--green);
       font-weight: 700;
     }
@@ -386,11 +386,11 @@
     const delta = 2;
     const rangeStart = Math.max(1, currentPage - delta);
     const rangeEnd = Math.min(totalPages, currentPage + delta);
-    if (rangeStart > 1) html += `<button onclick="goToPage(1)">1</button>${rangeStart > 2 ? '<span style="padding:5px 4px;color:#aaa;">…</span>' : ""}`;
+    if (rangeStart > 1) html += `<button onclick="goToPage(1)">1</button>${rangeStart > 2 ? '<span style="padding:5px 4px;color:#5b6482;">…</span>' : ""}`;
     for (let p = rangeStart; p <= rangeEnd; p++) {
       html += `<button onclick="goToPage(${p})" class="${p === currentPage ? "active" : ""}">${p}</button>`;
     }
-    if (rangeEnd < totalPages) html += `${rangeEnd < totalPages - 1 ? '<span style="padding:5px 4px;color:#aaa;">…</span>' : ""}<button onclick="goToPage(${totalPages})">${totalPages}</button>`;
+    if (rangeEnd < totalPages) html += `${rangeEnd < totalPages - 1 ? '<span style="padding:5px 4px;color:#5b6482;">…</span>' : ""}<button onclick="goToPage(${totalPages})">${totalPages}</button>`;
 
     html += `<button onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? "disabled" : ""}>Next ›</button>`;
     html += `<button onclick="goToPage(${totalPages})" ${currentPage === totalPages ? "disabled" : ""}>»</button>`;
@@ -443,9 +443,9 @@ function cleanNumber(value) {
 }
 
 function darkChartOptions(xLabel, yLabel) {
-  const textColor  = "#cbd5e1";
-  const gridColor  = "rgba(148,163,184,0.12)";
-  const tickColor  = "#94a3b8";
+  const textColor  = "#3b4257";
+  const gridColor  = "rgba(15,17,32,0.08)";
+  const tickColor  = "#5b6482";
   return {
     responsive: true,
     plugins: {
@@ -506,7 +506,9 @@ function renderScatterCharts(rows) {
       datasets: [{
         label: "Sale Units",
         data: saleData,
-        backgroundColor: "rgba(96,165,250,0.75)",
+        backgroundColor: "rgba(91,141,238,0.7)",
+        borderColor: "#5b8dee",
+        borderWidth: 1,
         pointRadius: 4,
         pointHoverRadius: 6
       }]
@@ -520,7 +522,9 @@ function renderScatterCharts(rows) {
       datasets: [{
         label: "Rental Units",
         data: rentalData,
-        backgroundColor: "rgba(74,222,128,0.75)",
+        backgroundColor: "rgba(15,157,120,0.65)",
+        borderColor: "#0f9d78",
+        borderWidth: 1,
         pointRadius: 4,
         pointHoverRadius: 6
       }]
