@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Terralytix Property Intelligence</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="property-intelligence.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <header class="pi-topbar">
+    <a href="index.html" class="pi-brand">
+      <img src="LogoNoText-noBG.png" alt="Property Radar logo">
+      <span class="pi-brand-text">
+        <span class="pi-brand-name"><span style="color:var(--navy);">Terralytix</span> <span style="color:var(--green);">Property Intelligence</span></span>
+        <span class="pi-brand-sub">See the market behind the listings.</span>
+      </span>
+    </a>
+    <div class="pi-topbar-right">
+      <a href="index.html" class="pi-back-link">&larr; Back to Listings</a>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle light/dark theme">
+        <span id="themeToggleIcon">🌙</span> <span id="themeToggleLabel">Dark</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- SECTION NAV -->
+  <nav class="pi-section-nav" id="sectionNav">
+    <a href="#pulse">Market Pulse</a>
+    <a href="#price">Price Intelligence</a>
+    <a href="#localities">Localities</a>
+    <a href="#bhk">BHK &amp; Type</a>
+    <a href="#rentals">Rentals &amp; Yield</a>
+    <a href="#opportunities">Opportunity Signals</a>
+    <a href="#quality">Data Quality</a>
+    <a href="#sources">Sources &amp; Cities</a>
+    <a href="#methodology">Methodology</a>
+  </nav>
+
+  <!-- HERO -->
+  <div class="pi-hero">
+    <h1><span style="color:var(--navy);">Terralytix</span> <span style="color:var(--green);">Property Intelligence</span></h1>
+    <p>Explore the Property Radar dataset as a market intelligence terminal, not a listings feed: locality pricing, ₹/sqft, rents, indicative rental yields, and statistical opportunity signals — computed live from the current dataset.</p>
+    <div class="pi-hero-stats" id="heroStats">Loading dataset…</div>
+  </div>
+
+  <!-- GLOBAL FILTER BAR -->
+  <div class="pi-filterbar" id="filterBar">
+    <label>City
+      <select id="fCity"><option value="">All</option></select>
+    </label>
+    <label>Locality
+      <select id="fLocality"><option value="">All</option></select>
+    </label>
+    <label>Property Type
+      <select id="fPropertyType"><option value="">All</option></select>
+    </label>
+    <label>BHK
+      <select id="fBhk"><option value="">All</option></select>
+    </label>
+    <label>Sale / Rental
+      <select id="fSaleRental">
+        <option value="">All</option>
+        <option value="sale">Sale</option>
+        <option value="rental">Rental</option>
+      </select>
+    </label>
+    <label>Price Range (₹)
+      <span class="pi-price-range">
+        <input type="number" id="fPriceMin" placeholder="Min" />
+        <span>–</span>
+        <input type="number" id="fPriceMax" placeholder="Max" />
+      </span>
+    </label>
+    <label>Min. comparables
+      <input type="number" id="fMinCohort" value="10" min="1" style="width:60px;" />
+    </label>
+    <button class="pi-filter-reset" id="resetFilters" type="button">Reset filters</button>
+    <span class="pi-filter-count" id="filterCount"></span>
+  </div>
+
+  <div class="pi-wrap">
+
+    <!-- MARKET PULSE -->
+    <section class="pi-section" id="pulse">
+      <div class="pi-section-head">
+        <h2>Market Pulse</h2>
+        <p class="pi-q">What does the current filtered dataset look like right now?</p>
+      </div>
+      <div class="pi-grid pi-grid-4" id="pulseGrid"></div>
+    </section>
+
+    <!-- MARKET BRIEF -->
+    <section class="pi-section" id="brief">
+      <div class="pi-card">
+        <div class="pi-section-head" style="margin-bottom:8px;">
+          <h2>Market Brief</h2>
+          <p class="pi-q">Auto-generated directly from the statistics above — not a language model, so every sentence is traceable to a computed number.</p>
+        </div>
+        <div id="marketBrief" style="font-size:14px; color:var(--text2);"></div>
+      </div>
+    </section>
+
+    <!-- PRICE INTELLIGENCE -->
+    <section class="pi-section" id="price">
+      <div class="pi-section-head">
+        <h2>Price Intelligence</h2>
+        <p class="pi-q">How are asking prices distributed, and how does price scale with size?</p>
+      </div>
+
+      <div class="pi-grid pi-grid-2">
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Property Price Distribution</h3>
+          <div class="pi-chart-box"><canvas id="priceDistChart"></canvas></div>
+          <div class="pi-insight" id="priceDistInsight"></div>
+          <div class="pi-caveat">Asking-price based. Distribution is log-scaled and IQR-trimmed to exclude extraction outliers; median is used over mean because real-estate prices are heavily right-skewed.</div>
+        </div>
+
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Price vs. Built-up Size</h3>
+          <div class="pi-chart-box"><canvas id="priceSizeChart"></canvas></div>
+          <div class="pi-insight" id="priceSizeInsight"></div>
+          <div class="pi-caveat pi-caveat-warn">Points below the trendline are a statistical signal only — labeled "Potential Value Opportunity" — not a guarantee of an undervalued property.</div>
+        </div>
+      </div>
+
+      <div class="pi-card" style="margin-top:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+          <h3 style="margin:0; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Price / Sqft by Locality</h3>
+          <label style="font-size:11px; color:var(--muted); display:flex; align-items:center; gap:6px;">
+            BHK filter for this chart:
+            <select id="ppsfBhkFilter" style="font-size:12px; padding:5px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text);"><option value="">All BHK</option></select>
+          </label>
+        </div>
+        <div class="pi-chart-box pi-chart-tall"><canvas id="ppsfChart"></canvas></div>
+        <div class="pi-table-wrap" style="margin-top:14px;">
+          <table class="pi-table" id="ppsfTable"></table>
+        </div>
+        <div class="pi-caveat">Only localities meeting the minimum-comparables threshold (filter bar) are ranked, so one or two listings can't make a locality look artificially expensive.</div>
+      </div>
+    </section>
+
+    <!-- LOCALITIES -->
+    <section class="pi-section" id="localities">
+      <div class="pi-section-head">
+        <h2>Locality Intelligence</h2>
+        <p class="pi-q">Which localities have real market depth, and how do they rank? Click any locality name for a deep-dive.</p>
+      </div>
+      <div class="pi-grid pi-grid-2">
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Top Localities by Median ₹/Sqft</h3>
+          <div class="pi-table-wrap"><table class="pi-table" id="localityRankTable"></table></div>
+        </div>
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Most Active Localities (Market Depth)</h3>
+          <div class="pi-table-wrap"><table class="pi-table" id="localityDepthTable"></table></div>
+        </div>
+      </div>
+
+      <div class="pi-card" style="margin-top:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+          <h3 style="margin:0; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Locality × BHK Heatmap</h3>
+          <select id="heatmapMetric" style="font-size:12px; padding:5px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg3); color:var(--text);">
+            <option value="ppsf">Median ₹/Sqft</option>
+            <option value="price">Median Price</option>
+            <option value="rent">Median Rent</option>
+            <option value="count">Listing Count</option>
+          </select>
+        </div>
+        <div class="pi-heatmap-wrap"><table class="pi-heatmap" id="heatmapTable"></table></div>
+      </div>
+    </section>
+
+    <!-- BHK & PROPERTY TYPE -->
+    <section class="pi-section" id="bhk">
+      <div class="pi-section-head">
+        <h2>BHK &amp; Property Type Analysis</h2>
+        <p class="pi-q">How do price, size and rent scale across configurations and property types?</p>
+      </div>
+
+      <div class="pi-grid pi-grid-3">
+        <div class="pi-card"><h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">BHK vs Median Price</h3><div class="pi-chart-box pi-chart-short"><canvas id="bhkPriceChart"></canvas></div></div>
+        <div class="pi-card"><h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">BHK vs Median ₹/Sqft</h3><div class="pi-chart-box pi-chart-short"><canvas id="bhkPpsfChart"></canvas></div></div>
+        <div class="pi-card"><h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">BHK vs Median Rent</h3><div class="pi-chart-box pi-chart-short"><canvas id="bhkRentChart"></canvas></div></div>
+      </div>
+
+      <div class="pi-card" style="margin-top:18px;">
+        <div class="pi-table-wrap"><table class="pi-table" id="bhkTable"></table></div>
+      </div>
+
+      <div class="pi-grid pi-grid-3" style="margin-top:18px;">
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Property Type</h3>
+          <div class="pi-chart-box pi-chart-short"><canvas id="typeChart"></canvas></div>
+        </div>
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Facing</h3>
+          <div class="pi-chart-box pi-chart-short"><canvas id="facingChart"></canvas></div>
+          <div class="pi-caveat">Descriptive only — this is not a claim that facing direction causes price differences.</div>
+        </div>
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Floor Band</h3>
+          <div class="pi-chart-box pi-chart-short"><canvas id="floorChart"></canvas></div>
+          <div class="pi-caveat">Descriptive only — bucketed by floor number; total building height isn't in the dataset.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RENTALS & YIELD -->
+    <section class="pi-section" id="rentals">
+      <div class="pi-section-head">
+        <h2>Rental Intelligence &amp; Indicative Yield</h2>
+        <p class="pi-q">What do rents look like, and what gross yield do they imply against locality sale prices?</p>
+      </div>
+
+      <div class="pi-grid pi-grid-4" id="rentalPulseGrid" style="margin-bottom:18px;"></div>
+
+      <div class="pi-grid pi-grid-2">
+        <div class="pi-card"><h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Rent by Locality</h3><div class="pi-chart-box"><canvas id="rentLocalityChart"></canvas></div></div>
+        <div class="pi-card"><h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Rent vs Size</h3><div class="pi-chart-box"><canvas id="rentSizeChart"></canvas></div></div>
+      </div>
+
+      <div class="pi-card" style="margin-top:18px;">
+        <h3 style="margin:0 0 4px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Top Localities by Indicative Gross Rental Yield</h3>
+        <p class="pi-q" style="margin:0 0 10px;">Cohort estimate — (median annual rent ÷ median sale price) within the same locality + BHK — not a per-listing valuation.</p>
+        <div class="pi-table-wrap"><table class="pi-table" id="yieldTable"></table></div>
+        <div class="pi-caveat pi-caveat-warn">Labeled "Indicative Gross Rental Yield." This is not net yield (excludes maintenance, taxes, vacancy) and is not a per-property calculation.</div>
+      </div>
+    </section>
+
+    <!-- OPPORTUNITY SIGNALS -->
+    <section class="pi-section" id="opportunities">
+      <div class="pi-section-head">
+        <h2>Opportunity Signals</h2>
+        <p class="pi-q">Which listings sit meaningfully away from their comparable-cohort benchmark? Statistical signals, not valuations.</p>
+      </div>
+
+      <div class="pi-grid pi-grid-2">
+        <div>
+          <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--green2);">Below Locality Benchmark</h3>
+          <div class="pi-grid" style="grid-template-columns:1fr; gap:10px;" id="valueSignalCards"></div>
+        </div>
+        <div>
+          <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--red);">Premium Pricing Signal</h3>
+          <div class="pi-grid" style="grid-template-columns:1fr; gap:10px;" id="premiumSignalCards"></div>
+        </div>
+      </div>
+
+      <div class="pi-card" style="margin-top:18px;">
+        <h3 style="margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">How the Terralytix Opportunity Score is calculated</h3>
+        <p style="font-size:12.5px; color:var(--text2); margin:0;" id="scoreMethodology"></p>
+      </div>
+    </section>
+
+    <!-- DATA QUALITY -->
+    <section class="pi-section" id="quality">
+      <div class="pi-section-head">
+        <h2>Data Quality</h2>
+        <p class="pi-q">Analytics are only as good as the underlying data — here's how complete the current dataset is.</p>
+      </div>
+      <div class="pi-grid pi-grid-4" id="qualityGrid"></div>
+      <div class="pi-grid pi-grid-2" style="margin-top:18px;">
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Completeness Distribution</h3>
+          <div class="pi-chart-box pi-chart-short"><canvas id="completenessChart"></canvas></div>
+        </div>
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Potential Duplicate Listings</h3>
+          <p class="pi-q" style="margin:0 0 10px;">Heuristic only (shared contact number + similar attributes) — nothing is auto-deleted.</p>
+          <div class="pi-table-wrap pi-collapsible" id="duplicatesWrap"><table class="pi-table" id="duplicatesTable"></table></div>
+          <button class="pi-filter-reset" id="duplicatesToggle" type="button" style="margin:10px 0 0;">Show all</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SOURCES & CITIES -->
+    <section class="pi-section" id="sources">
+      <div class="pi-section-head">
+        <h2>Source &amp; City Intelligence</h2>
+        <p class="pi-q">Where is this data coming from, and how does it break down by city?</p>
+      </div>
+      <div class="pi-grid pi-grid-2">
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Listings by Source File (Top 15)</h3>
+          <div class="pi-chart-box"><canvas id="sourceChart"></canvas></div>
+        </div>
+        <div class="pi-card">
+          <h3 style="margin:0 0 10px; font-size:12.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted);">Listings Over Time (by classifieds issue date)</h3>
+          <div class="pi-chart-box"><canvas id="timeChart"></canvas></div>
+          <div class="pi-caveat">Date parsed from the source filename (e.g. "...Apr112026..."), not a scrape/first-seen timestamp. See Methodology for the recommended schema change to support true trend analytics.</div>
+        </div>
+      </div>
+      <div class="pi-card" style="margin-top:18px;">
+        <h3 style="margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">City Comparison</h3>
+        <div class="pi-table-wrap"><table class="pi-table" id="cityTable"></table></div>
+      </div>
+    </section>
+
+    <!-- METHODOLOGY -->
+    <section class="pi-section" id="methodology">
+      <div class="pi-section-head">
+        <h2>Data Methodology &amp; Roadmap</h2>
+        <p class="pi-q">Trust and transparency — how this dashboard computes what it shows, and what's next.</p>
+      </div>
+      <div class="pi-grid pi-grid-2">
+        <div class="pi-card pi-methodology">
+          <h3 style="margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">How to read this dashboard</h3>
+          <ul id="methodologyList"></ul>
+        </div>
+        <div class="pi-card">
+          <h3 style="margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);">Roadmap</h3>
+          <div id="roadmapList"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="pi-footer">
+    <div>Terralytix Property Intelligence is powered by the <a href="index.html">Property Radar</a> listings dataset — a subsidiary product of <a href="https://terralytixai.com" target="_blank" rel="noopener">Terralytix</a>.</div>
+    <div>Site designed &amp; maintained by <a href="https://www.SundarDesignStudio.com" target="_blank" rel="noopener">www.SundarDesignStudio.com</a></div>
+  </footer>
+
+  <!-- LOCALITY DEEP-DIVE MODAL -->
+  <div class="pi-modal-backdrop" id="localityModalBackdrop">
+    <div class="pi-modal">
+      <div class="pi-modal-head">
+        <h2 id="localityModalTitle">Locality</h2>
+        <button class="pi-modal-close" id="localityModalClose" type="button" aria-label="Close">✕</button>
+      </div>
+      <div id="localityModalBody"></div>
+    </div>
+  </div>
+
+  <script src="property-intelligence.js"></script>
+</body>
+</html>
