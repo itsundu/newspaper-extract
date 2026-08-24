@@ -49,6 +49,22 @@
     }
 
     /* ── Charts ── */
+    .chart-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .chart-container .chart-panel {
+      flex: 1 1 calc(50% - 12px);
+      min-width: 320px;
+    }
+
+    .chart-container-3 .chart-panel {
+      flex: 1 1 calc(33.333% - 16px);
+    }
+
     .chart-panel {
       background: var(--bg2);
       border: 1px solid var(--border);
@@ -197,25 +213,44 @@
 <body>
     <!-- NAVBAR -->
     <header class="navbar">
-        <div class="logo" style="align-self: center;"><a href="https://terralytixai.com">Terralytix AI</a></div>
+        <a href="https://terralytixai.com" class="logo" style="display:flex; align-items:center; gap:10px;">
+          <img src="images/terralytix-logo.png" alt="Terralytix Logo" class="logo-img" style="height:30px;">
+          <span>Terralytix AI</span>
+        </a>
     </header>
-    <header class="navbar">
-        <div class="logo"><img src="images/terralytix-logo.png" alt="Terralytix Logo" class="logo-img"> </div>
-      </header>
 
 
   <h2>Active Real Estate Listings</h2>
 
-    <div class="chart-container" style="display:flex; gap:40px; margin-bottom:30px;">
+    <div class="chart-container">
 
-    <div class="chart-panel" style="width:48%;">
+    <div class="chart-panel">
         <h3>Sale Units: Sqft Builtup vs Price Value</h3>
         <canvas id="saleScatterChart"></canvas>
     </div>
 
-    <div class="chart-panel" style="width:48%;">
+    <div class="chart-panel">
         <h3>Rental Units: Sqft Builtup vs Rent Value</h3>
         <canvas id="rentalScatterChart"></canvas>
+    </div>
+
+    </div>
+
+    <div class="chart-container chart-container-3">
+
+    <div class="chart-panel">
+        <h3>Sqft Builtup Distribution</h3>
+        <canvas id="sqftHistChart"></canvas>
+    </div>
+
+    <div class="chart-panel">
+        <h3>Sale Price Distribution</h3>
+        <canvas id="priceHistChart"></canvas>
+    </div>
+
+    <div class="chart-panel">
+        <h3>Rental Price Distribution</h3>
+        <canvas id="rentHistChart"></canvas>
     </div>
 
     </div>
@@ -280,19 +315,34 @@
   const PAGE_SIZE = 50;
 
   async function loadListings() {
-    const { data, error } = await supabaseClient
-      .from("active_listings")
-      .select("*")
-      .order("ID", { ascending: false });
+    // Supabase/PostgREST caps each request at 1000 rows, so page through
+    // with .range() until a short page tells us we've reached the end.
+    const FETCH_PAGE = 1000;
+    let rows = [];
+    let from = 0;
 
-    if (error) {
-      console.error("Supabase error:", error);
-      return;
+    while (true) {
+      const { data, error } = await supabaseClient
+        .from("active_listings")
+        .select("*")
+        .order("ID", { ascending: false })
+        .range(from, from + FETCH_PAGE - 1);
+
+      if (error) {
+        console.error("Supabase error:", error);
+        break;
+      }
+      if (!data || data.length === 0) break;
+
+      rows = rows.concat(data);
+      if (data.length < FETCH_PAGE) break;
+      from += FETCH_PAGE;
     }
 
-    fullData = data;
+    fullData = rows;
     applyFilters();
     renderScatterCharts(fullData);
+    renderHistograms(fullData);
   }
 
   const tableColumns = [
@@ -533,7 +583,164 @@ function renderScatterCharts(rows) {
   });
 }
 
+/* ── Distribution histograms (Sqft / Sale Price / Rental Price) ── */
 
+let sqftHistChart  = null;
+let priceHistChart = null;
+let rentHistChart  = null;
+
+function iqrBounds1D(values, multiplier = 3, floorAtZero = true) {
+  const s = [...values].sort((a, b) => a - b);
+  const q1 = s[Math.floor(s.length * 0.25)];
+  const q3 = s[Math.floor(s.length * 0.75)];
+  const iqr = q3 - q1;
+  const lo = q1 - multiplier * iqr;
+  return { lo: floorAtZero ? Math.max(0, lo) : lo, hi: q3 + multiplier * iqr };
+}
+
+function formatCompactINR(v) {
+  if (v >= 10000000) return "₹" + (v / 10000000).toFixed(v % 10000000 === 0 ? 0 : 1) + "Cr";
+  if (v >= 100000)   return "₹" + (v / 100000).toFixed(v % 100000 === 0 ? 0 : 1) + "L";
+  if (v >= 1000)     return "₹" + (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + "k";
+  return "₹" + Math.round(v);
+}
+
+function formatCompactNumber(v) {
+  return Math.round(v).toLocaleString("en-IN");
+}
+
+// Buckets a flat array of numbers into `binCount` equal-width bins (after
+// trimming extreme outliers via IQR) so the distribution reads clearly.
+function buildHistogram(values, binCount, labelFormatter) {
+  if (values.length < 4) return { labels: [], counts: [] };
+
+  const { lo, hi } = iqrBounds1D(values);
+  const trimmed = values.filter(v => v >= lo && v <= hi);
+  if (trimmed.length < 2) return { labels: [], counts: [] };
+
+  const min = Math.min(...trimmed);
+  const max = Math.max(...trimmed);
+  const binSize = (max - min) / binCount || 1;
+  const counts = new Array(binCount).fill(0);
+
+  trimmed.forEach(v => {
+    let idx = Math.floor((v - min) / binSize);
+    if (idx >= binCount) idx = binCount - 1;
+    if (idx < 0) idx = 0;
+    counts[idx]++;
+  });
+
+  const labels = counts.map((_, i) => {
+    const binLo = min + i * binSize;
+    const binHi = min + (i + 1) * binSize;
+    return `${labelFormatter(binLo)}–${labelFormatter(binHi)}`;
+  });
+
+  return { labels, counts };
+}
+
+// Sale/rent prices here span from single digits (bad parses) to hundreds of
+// crores (legit deals), often several orders of magnitude apart. Bucketing
+// that range linearly puts ~90% of listings in one bin, so bin in log space
+// instead — it spreads the bulk of the data out and is the standard
+// technique for heavy-tailed, multi-order-of-magnitude monetary data.
+function buildLogHistogram(values, binCount, labelFormatter) {
+  const positive = values.filter(v => v > 0);
+  if (positive.length < 4) return { labels: [], counts: [] };
+
+  const logs = positive.map(v => Math.log10(v));
+  const { lo, hi } = iqrBounds1D(logs, 1.5, false);
+  const trimmed = logs.filter(l => l >= lo && l <= hi);
+  if (trimmed.length < 2) return { labels: [], counts: [] };
+
+  const min = Math.min(...trimmed);
+  const max = Math.max(...trimmed);
+  const binSize = (max - min) / binCount || 1;
+  const counts = new Array(binCount).fill(0);
+
+  trimmed.forEach(l => {
+    let idx = Math.floor((l - min) / binSize);
+    if (idx >= binCount) idx = binCount - 1;
+    if (idx < 0) idx = 0;
+    counts[idx]++;
+  });
+
+  const labels = counts.map((_, i) => {
+    const binLo = Math.pow(10, min + i * binSize);
+    const binHi = Math.pow(10, min + (i + 1) * binSize);
+    return `${labelFormatter(binLo)}–${labelFormatter(binHi)}`;
+  });
+
+  return { labels, counts };
+}
+
+function histogramOptions(xLabel) {
+  const opts = darkChartOptions(xLabel, "Number of Listings");
+  opts.plugins.legend.display = false;
+  opts.scales.x.ticks.maxRotation = 55;
+  opts.scales.x.ticks.minRotation = 45;
+  opts.scales.x.ticks.font = { size: 10 };
+  opts.scales.y.ticks.precision = 0;
+  return opts;
+}
+
+function renderHistogram(chartInstance, canvasId, values, binCount, labelFormatter, xLabel, color, borderColor, useLogScale) {
+  const { labels, counts } = useLogScale
+    ? buildLogHistogram(values, binCount, labelFormatter)
+    : buildHistogram(values, binCount, labelFormatter);
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  if (chartInstance) chartInstance.destroy();
+
+  return new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Listings",
+        data: counts,
+        backgroundColor: color,
+        borderColor: borderColor,
+        borderWidth: 1,
+        borderRadius: 4,
+        maxBarThickness: 42
+      }]
+    },
+    options: histogramOptions(xLabel)
+  });
+}
+
+function renderHistograms(rows) {
+  const sqftValues = rows
+    .map(r => cleanNumber(r.sqft_builtup))
+    .filter(v => v !== null && v > 0);
+
+  const priceValues = rows
+    .filter(r => !r.is_rental)
+    .map(r => cleanNumber(r.price_in_inr))
+    .filter(v => v !== null && v > 0);
+
+  const rentValues = rows
+    .filter(r => !!r.is_rental)
+    .map(r => cleanNumber(r.rent_in_inr))
+    .filter(v => v !== null && v > 0);
+
+  sqftHistChart = renderHistogram(
+    sqftHistChart, "sqftHistChart", sqftValues, 10, formatCompactNumber,
+    "Sqft Builtup", "rgba(183,121,31,0.7)", "#b7791f", false
+  );
+
+  // Price/rent span single-digit to hundred-crore values, so these use
+  // log-scale bins (see buildLogHistogram) instead of linear ones.
+  priceHistChart = renderHistogram(
+    priceHistChart, "priceHistChart", priceValues, 10, formatCompactINR,
+    "Sale Price (INR, log scale)", "rgba(91,141,238,0.7)", "#5b8dee", true
+  );
+
+  rentHistChart = renderHistogram(
+    rentHistChart, "rentHistChart", rentValues, 10, formatCompactINR,
+    "Rent (INR, log scale)", "rgba(15,157,120,0.7)", "#0f9d78", true
+  );
+}
 
   function applyFilters() {
     const val = id => (document.getElementById(id)?.value || "").toLowerCase().trim();
