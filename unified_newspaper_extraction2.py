@@ -56,7 +56,11 @@ def _load_localities() -> List[str]:
 # ======================================================================
 
 class Config:
-    PDF_GLOB = r".\mylaporetimes\MTClassifieds*.pdf"
+    # Forward slashes work on both Windows and POSIX; a Windows-style
+    # ".\mylaporetimes\..." backslash path silently matches nothing on
+    # Linux (GitHub Actions' runner), since glob.glob() treats "\" there as
+    # a literal character, not a path separator.
+    PDF_GLOB = "mylaporetimes/MTClassifieds*.pdf"
     RAW_CSV_OUTPUT = "raw_listings_temp.csv"
     STRUCTURED_CSV_OUTPUT = "structured_real_estate_accumulated.csv"
     PROCESSED_FILES_LOG = "processed_pdfs.txt"
